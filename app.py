@@ -7,9 +7,9 @@ import datetime
 import concurrent.futures
 import os
 import markdown
-from docx import Document # 👈 V1.1 新增：用于处理 Word
-from docx.shared import Pt, RGBColor # 👈 V1.1 新增：用于调整 Word 字体颜色
-from io import BytesIO # 👈 V1.1 新增：用于在内存中生成文件
+from docx import Document
+from docx.shared import Pt, RGBColor
+from io import BytesIO
 
 # ==========================================
 # 0. 【网络配置】
@@ -53,47 +53,52 @@ def scrape_one_url(url):
     except Exception as e:
         return url, f"[抓取出错: {str(e)}]"
 
-# 🌟 V1.1 升级：支持多语言 Prompt
+# 🌟 V1.2 升级：Prompt 强制分段 + 视觉隔离
 def ai_generate_daily_brief(raw_input, scraped_text_block, lang_mode):
     
-    # 基础要求
+    # 基础结构：要求 AI 严格分行
     base_prompt = f"""
     你是一位 Chilquinta 能源公司的情报专家。
     请根据提供的【原始分类】和【抓取的正文】，写一份排版精美的日报。
     时间：{datetime.date.today()}
     
     【排版严格要求】：
-    请对每一条新闻使用以下 Markdown 格式：
+    每一条新闻必须严格遵守以下 Markdown 结构（注意空行）：
+    
     ### 🍊 [标题]
-    [正文内容]
+    
+    [正文段落1]
+    
+    [正文段落2 (如果是双语模式)]
+    
     **🔗 Source:** [URL]
+    
     ---
     """
 
-    # 根据选择的语言模式，调整指令
     if lang_mode == "中文 (保留西语术语)":
         lang_instruction = """
         【语言要求】：
-        1. 使用**中文**撰写摘要。
-        2. **术语保留**：所有机构名、法规、项目名、人名，必须在中文后保留西语原文，例如：国家能源委员会 (CNE)。
-        3. 标题使用中文。
+        1. 标题：中文。
+        2. 正文：中文摘要。
+        3. **术语保留**：机构名、法规、项目名后必须保留西语原文，如：国家能源委员会 (CNE)。
         """
     elif lang_mode == "纯西语 (Español)":
         lang_instruction = """
         【语言要求】：
-        1. 使用**专业西班牙语 (Español)** 撰写摘要。
-        2. 风格要正式、商务 (Formal Business Tone)。
-        3. 标题使用西语。
+        1. 标题：Español.
+        2. 正文：Resumen en Español (Formal Business Tone).
         """
-    else: # 中文 + 西语
+    else: # 中文 + 西语 (强行分开)
         lang_instruction = """
-        【语言要求】：
-        1. **双语对照模式**：对于每一条新闻，先写一段中文摘要，紧接着换行，写一段西班牙语摘要。
-        2. 格式如下：
-           [中文摘要内容...]
-           
-           (Español): [Resumen en español...]
-        3. 标题使用：中文标题 / Título en Español
+        【语言要求 - 双语对照模式】：
+        请严格按以下格式输出，不要把中西文混在一段里：
+        
+        **🇨🇳 中文摘要：**
+        [这里写中文摘要...]
+        
+        **🇪🇸 Español:**
+        [Aquí el resumen en español...]
         """
 
     full_prompt = base_prompt + lang_instruction
@@ -105,7 +110,7 @@ def ai_generate_daily_brief(raw_input, scraped_text_block, lang_mode):
     except Exception as e:
         return f"AI 思考出错: {str(e)}"
 
-# 生成 HTML (保持不变，用于预览和网页下载)
+# 🌟 V1.2 升级：CSS 字体层级优化
 def convert_to_html_file(markdown_text):
     html_body = markdown.markdown(markdown_text)
     html_content = f"""
@@ -115,19 +120,83 @@ def convert_to_html_file(markdown_text):
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
-            body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.8; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #f4f7f6; }}
-            .container {{ background-color: #ffffff; padding: 40px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }}
-            h2 {{ color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; margin-top: 30px; }}
-            h3 {{ color: #d35400; margin-top: 25px; margin-bottom: 10px; font-size: 1.15em; font-weight: 600; }}
-            p {{ margin-bottom: 15px; text-align: justify; }}
-            ul {{ background-color: #f8f9fa; padding: 15px 15px 15px 35px; border-radius: 8px; border-left: 5px solid #3498db; margin-bottom: 20px; }}
-            li {{ margin-bottom: 8px; font-size: 0.95em; word-break: break-all; color: #555; }}
-            a {{ color: #007bff; text-decoration: none; font-weight: 500; }}
-            .footer {{ margin-top: 40px; text-align: center; font-size: 0.8em; color: #aaa; }}
+            /* --- 全局字体设置 --- */
+            body {{ 
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; 
+                line-height: 1.6; /* 行高适中 */
+                color: #333; 
+                background-color: #f4f7f6; 
+                max-width: 800px; 
+                margin: 0 auto; 
+                padding: 20px;
+            }}
+            .container {{ 
+                background-color: #ffffff; 
+                padding: 40px; 
+                border-radius: 12px; 
+                box-shadow: 0 4px 15px rgba(0,0,0,0.05); 
+            }}
+            
+            /* --- 1. 一级大标题 (分类) --- */
+            h2 {{ 
+                color: #2c3e50; 
+                border-bottom: 2px solid #3498db; 
+                padding-bottom: 10px; 
+                margin-top: 40px; 
+                margin-bottom: 25px;
+                font-size: 1.5em; /* 约 24px */
+                font-weight: 700;
+            }}
+
+            /* --- 2. 二级小标题 (新闻标题) --- */
+            h3 {{ 
+                color: #d35400; /* 橙色 */
+                margin-top: 30px; 
+                margin-bottom: 15px; 
+                font-size: 1.2em; /* 约 19px，比正文大，比分类小 */
+                font-weight: 600;
+            }}
+
+            /* --- 3. 正文 (Body Text) - 你的核心痛点 --- */
+            p {{ 
+                margin-bottom: 15px; 
+                font-size: 15px; /* 👈 调小了！正常的阅读字号 */
+                color: #444; /* 稍微淡一点的黑，护眼 */
+                text-align: justify; /* 两端对齐，看起来整齐 */
+            }}
+            
+            /* 针对双语标签的加粗部分 */
+            strong {{
+                color: #2c3e50;
+                font-weight: 600;
+            }}
+
+            /* --- 链接样式 (独立成行) --- */
+            /* 如果 Prompt 生成了列表形式 */
+            ul {{ 
+                background-color: #f8f9fa; 
+                padding: 10px 15px 10px 35px; 
+                border-radius: 6px; 
+                border-left: 4px solid #3498db; 
+                margin-bottom: 25px; /* 增加下间距，与下一条新闻隔开 */
+            }}
+            li {{ 
+                margin-bottom: 5px; 
+                font-size: 13px; /* 👈 链接字体更小，不抢戏 */
+                color: #666; 
+                word-break: break-all; 
+            }}
+            a {{ color: #007bff; text-decoration: none; }}
+
+            .footer {{ margin-top: 40px; text-align: center; font-size: 12px; color: #aaa; }}
+            
+            /* 手机适配 */
             @media only screen and (max-width: 600px) {{
                 body {{ padding: 10px; }}
                 .container {{ padding: 20px; }}
-                h2 {{ font-size: 1.4em; }}
+                h2 {{ font-size: 1.3em; }}
+                h3 {{ font-size: 1.1em; }}
+                p {{ font-size: 15px; }} /* 手机上保持清晰 */
             }}
         </style>
     </head>
@@ -138,47 +207,42 @@ def convert_to_html_file(markdown_text):
     """
     return html_content
 
-# 🌟 V1.1 新增：生成 Word 文档
+# Word 生成 (逻辑微调，适配新的 Prompt 格式)
 def generate_word_file(markdown_text):
     doc = Document()
     doc.add_heading(f'Chilquinta Daily News - {datetime.date.today()}', 0)
 
-    # 简单的 Markdown 解析逻辑
     lines = markdown_text.split('\n')
     for line in lines:
         line = line.strip()
         if not line:
             continue
         
-        # 处理标题 (###)
         if line.startswith('### '):
-            clean_line = line.replace('### ', '').replace('🍊', '').strip() # 去掉 emoji 以免 Word 乱码
+            clean_line = line.replace('### ', '').replace('🍊', '').strip()
             heading = doc.add_heading(clean_line, level=2)
             run = heading.runs[0]
-            run.font.color.rgb = RGBColor(211, 84, 0) # 橙色
+            run.font.color.rgb = RGBColor(211, 84, 0)
             
-        # 处理列表 (*)
-        elif line.startswith('* '):
-            clean_line = line.replace('* ', '').strip()
-            # 去掉 Markdown 链接格式 [text](url) 保留 text
+        elif line.startswith('* ') or line.startswith('- '): # 列表
+            clean_line = re.sub(r'^[*-]\s+', '', line)
             clean_line = re.sub(r'\[(.*?)\]\(.*?\)', r'\1', clean_line) 
             doc.add_paragraph(clean_line, style='List Bullet')
             
-        # 处理来源链接
-        elif "Source:" in line or "来源链接" in line:
-            doc.add_paragraph(line, style='Intense Quote')
+        elif "Source:" in line or "🔗" in line:
+            p = doc.add_paragraph()
+            run = p.add_run(line)
+            run.font.size = Pt(9) # Word里链接也弄小点
+            run.font.color.rgb = RGBColor(100, 100, 100)
             
-        # 处理分割线
         elif line.startswith('---'):
-            doc.add_paragraph('_' * 50)
+            doc.add_paragraph('_' * 20)
             
-        # 普通正文
-        else:
-            # 去掉粗体符号
+        else: # 正文
             clean_line = line.replace('**', '')
-            doc.add_paragraph(clean_line)
-
-    # 保存到内存流
+            p = doc.add_paragraph(clean_line)
+            # 可以在这里设置 Word 正文字体大小，默认通常是 11pt 或 12pt，比较合适
+            
     buffer = BytesIO()
     doc.save(buffer)
     buffer.seek(0)
@@ -187,14 +251,12 @@ def generate_word_file(markdown_text):
 # ==========================================
 # 3. 界面构建
 # ==========================================
-st.set_page_config(page_title="Chilquinta News v1.1", page_icon="⚡", layout="wide")
-st.title("⚡ Chilquinta 每日新闻 (v1.1)")
-st.caption("支持多语言切换 • 支持 Word 下载")
+st.set_page_config(page_title="Chilquinta News v1.2", page_icon="⚡", layout="wide")
+st.title("⚡ Chilquinta 每日新闻 (v1.2)")
+st.caption("排版优化版 • 字体层级清晰 • 独立分行")
 
-# 输入区
 raw_text = st.text_area("请粘贴群消息:", height=150)
 
-# 🌟 V1.1 新增：语言选择器
 lang_option = st.radio(
     "请选择生成语言:",
     ("中文 (保留西语术语)", "纯西语 (Español)", "中文 & 西语对照"),
@@ -222,17 +284,13 @@ if st.button("🚀 开始生成日报", type="primary"):
         
         status.write(f"🧠 AI 正在用【{lang_option}】模式撰写报告...")
         
-        # 传递语言参数
         report_md = ai_generate_daily_brief(raw_text, scraped_data_str, lang_option)
-        
-        # 生成文件
         report_html = convert_to_html_file(report_md)
-        word_file = generate_word_file(report_md) # 生成 Word
+        word_file = generate_word_file(report_md)
         
         status.update(label="✅ 完成！", state="complete", expanded=False)
         st.markdown("---")
         
-        # 🌟 V1.1 升级：双下载按钮
         col1, col2 = st.columns(2)
         with col1:
             st.download_button(
