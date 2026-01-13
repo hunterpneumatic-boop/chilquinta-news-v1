@@ -7,13 +7,14 @@ import datetime
 import concurrent.futures
 import os
 import markdown
+from docx import Document # 👈 V1.1 新增：用于处理 Word
+from docx.shared import Pt, RGBColor # 👈 V1.1 新增：用于调整 Word 字体颜色
+from io import BytesIO # 👈 V1.1 新增：用于在内存中生成文件
 
 # ==========================================
 # 0. 【网络配置】
 # ==========================================
-# 只有当检测到是本地运行时（没有云端特有的环境变量），才开启代理
-# 这是一个更通用的判断方法
-if "OS" in os.environ: # Windows 本地通常会有这个变量，云端 Linux 没有
+if "OS" in os.environ:
     os.environ["http_proxy"] = "http://127.0.0.1:7897"
     os.environ["https_proxy"] = "http://127.0.0.1:7897"
 
@@ -21,9 +22,6 @@ if "OS" in os.environ: # Windows 本地通常会有这个变量，云端 Linux �
 # 1. 配置区域
 # ==========================================
 try:
-    # 🌟 无论在本地还是云端，现在都统一用 st.secrets 读取
-    # 本地它会读 .streamlit/secrets.toml
-    # 云端它会读你刚才在网页填的 Secrets
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 except FileNotFoundError:
     st.error("❌ 未找到密钥配置！请确保本地有 .streamlit/secrets.toml 或云端已配置 Secrets。")
@@ -33,7 +31,7 @@ genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-flash-latest')
 
 # ==========================================
-# 2. 核心功能 (完全不用动)
+# 2. 核心功能
 # ==========================================
 def extract_urls(text):
     url_pattern = r'(https?://[^\s]+)'
@@ -55,37 +53,59 @@ def scrape_one_url(url):
     except Exception as e:
         return url, f"[抓取出错: {str(e)}]"
 
-def ai_generate_daily_brief(raw_input, scraped_text_block):
-    prompt = f"""
+# 🌟 V1.1 升级：支持多语言 Prompt
+def ai_generate_daily_brief(raw_input, scraped_text_block, lang_mode):
+    
+    # 基础要求
+    base_prompt = f"""
     你是一位 Chilquinta 能源公司的情报专家。
-    请根据提供的【原始分类】和【抓取的正文】，写一份排版精美的中文日报。
-
+    请根据提供的【原始分类】和【抓取的正文】，写一份排版精美的日报。
+    时间：{datetime.date.today()}
+    
     【排版严格要求】：
     请对每一条新闻使用以下 Markdown 格式：
-
-    ### 🍊 [这里写中文标题] (这里保留西语原文术语)
-    
-    [这里写详细的新闻摘要，包含具体数据。注意：摘要写完后必须换行]
-
-    **🔗 来源链接：**
-    * [链接1]
-
+    ### 🍊 [标题]
+    [正文内容]
+    **🔗 Source:** [URL]
     ---
-
-    【内容要求】：
-    1. **结构复刻**：保留原始消息中的分类。
-    2. **深度摘要**：概括核心事实。
-    3. **术语保留**：机构名、法规、项目名在中文后保留西语原文。
-    
-    【时间】：{datetime.date.today()}
     """
+
+    # 根据选择的语言模式，调整指令
+    if lang_mode == "中文 (保留西语术语)":
+        lang_instruction = """
+        【语言要求】：
+        1. 使用**中文**撰写摘要。
+        2. **术语保留**：所有机构名、法规、项目名、人名，必须在中文后保留西语原文，例如：国家能源委员会 (CNE)。
+        3. 标题使用中文。
+        """
+    elif lang_mode == "纯西语 (Español)":
+        lang_instruction = """
+        【语言要求】：
+        1. 使用**专业西班牙语 (Español)** 撰写摘要。
+        2. 风格要正式、商务 (Formal Business Tone)。
+        3. 标题使用西语。
+        """
+    else: # 中文 + 西语
+        lang_instruction = """
+        【语言要求】：
+        1. **双语对照模式**：对于每一条新闻，先写一段中文摘要，紧接着换行，写一段西班牙语摘要。
+        2. 格式如下：
+           [中文摘要内容...]
+           
+           (Español): [Resumen en español...]
+        3. 标题使用：中文标题 / Título en Español
+        """
+
+    full_prompt = base_prompt + lang_instruction
+    
     try:
         full_content = f"【原始消息框架】:\n{raw_input}\n\n【抓取的详细正文】:\n{scraped_text_block}"
-        response = model.generate_content(prompt + "\n\n" + full_content)
+        response = model.generate_content(full_prompt + "\n\n" + full_content)
         return response.text
     except Exception as e:
         return f"AI 思考出错: {str(e)}"
 
+# 生成 HTML (保持不变，用于预览和网页下载)
 def convert_to_html_file(markdown_text):
     html_body = markdown.markdown(markdown_text)
     html_content = f"""
@@ -118,14 +138,68 @@ def convert_to_html_file(markdown_text):
     """
     return html_content
 
+# 🌟 V1.1 新增：生成 Word 文档
+def generate_word_file(markdown_text):
+    doc = Document()
+    doc.add_heading(f'Chilquinta Daily News - {datetime.date.today()}', 0)
+
+    # 简单的 Markdown 解析逻辑
+    lines = markdown_text.split('\n')
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        
+        # 处理标题 (###)
+        if line.startswith('### '):
+            clean_line = line.replace('### ', '').replace('🍊', '').strip() # 去掉 emoji 以免 Word 乱码
+            heading = doc.add_heading(clean_line, level=2)
+            run = heading.runs[0]
+            run.font.color.rgb = RGBColor(211, 84, 0) # 橙色
+            
+        # 处理列表 (*)
+        elif line.startswith('* '):
+            clean_line = line.replace('* ', '').strip()
+            # 去掉 Markdown 链接格式 [text](url) 保留 text
+            clean_line = re.sub(r'\[(.*?)\]\(.*?\)', r'\1', clean_line) 
+            doc.add_paragraph(clean_line, style='List Bullet')
+            
+        # 处理来源链接
+        elif "Source:" in line or "来源链接" in line:
+            doc.add_paragraph(line, style='Intense Quote')
+            
+        # 处理分割线
+        elif line.startswith('---'):
+            doc.add_paragraph('_' * 50)
+            
+        # 普通正文
+        else:
+            # 去掉粗体符号
+            clean_line = line.replace('**', '')
+            doc.add_paragraph(clean_line)
+
+    # 保存到内存流
+    buffer = BytesIO()
+    doc.save(buffer)
+    buffer.seek(0)
+    return buffer
+
 # ==========================================
 # 3. 界面构建
 # ==========================================
-st.set_page_config(page_title="Chilquinta News v1.0", page_icon="⚡", layout="wide")
-st.title("⚡ Chilquinta 每日新闻 (v1.0)")
-st.caption("粘贴群消息 -> 生成精美 HTML 日报")
+st.set_page_config(page_title="Chilquinta News v1.1", page_icon="⚡", layout="wide")
+st.title("⚡ Chilquinta 每日新闻 (v1.1)")
+st.caption("支持多语言切换 • 支持 Word 下载")
 
-raw_text = st.text_area("请粘贴群消息:", height=200)
+# 输入区
+raw_text = st.text_area("请粘贴群消息:", height=150)
+
+# 🌟 V1.1 新增：语言选择器
+lang_option = st.radio(
+    "请选择生成语言:",
+    ("中文 (保留西语术语)", "纯西语 (Español)", "中文 & 西语对照"),
+    horizontal=True
+)
 
 if st.button("🚀 开始生成日报", type="primary"):
     if not raw_text or "http" not in raw_text:
@@ -134,6 +208,7 @@ if st.button("🚀 开始生成日报", type="primary"):
         urls = extract_urls(raw_text)
         status = st.status(f"发现 {len(urls)} 条链接，正在并发抓取...", expanded=True)
         scraped_data_str = ""
+        
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
             future_to_url = {executor.submit(scrape_one_url, url): url for url in urls}
             for future in concurrent.futures.as_completed(future_to_url):
@@ -144,11 +219,34 @@ if st.button("🚀 开始生成日报", type="primary"):
                     status.write(f"✅ 已抓取: {url[:40]}...")
                 except:
                     status.write(f"❌ 失败: {url[:40]}")
-        status.write("🧠 AI 正在撰写报告...")
-        report_md = ai_generate_daily_brief(raw_text, scraped_data_str)
+        
+        status.write(f"🧠 AI 正在用【{lang_option}】模式撰写报告...")
+        
+        # 传递语言参数
+        report_md = ai_generate_daily_brief(raw_text, scraped_data_str, lang_option)
+        
+        # 生成文件
         report_html = convert_to_html_file(report_md)
+        word_file = generate_word_file(report_md) # 生成 Word
+        
         status.update(label="✅ 完成！", state="complete", expanded=False)
         st.markdown("---")
-        st.markdown(report_md) 
-        date_str = datetime.datetime.now().strftime("%Y-%m-%d")
-        st.download_button(label="📥 下载精美排版日报 (.html)", data=report_html, file_name=f"Chilquinta_Report_{date_str}.html", mime="text/html")
+        
+        # 🌟 V1.1 升级：双下载按钮
+        col1, col2 = st.columns(2)
+        with col1:
+            st.download_button(
+                label="📥 下载网页版 (.html)",
+                data=report_html,
+                file_name=f"Chilquinta_News_{datetime.date.today()}.html",
+                mime="text/html"
+            )
+        with col2:
+            st.download_button(
+                label="📥 下载 Word 版 (.docx)",
+                data=word_file,
+                file_name=f"Chilquinta_News_{datetime.date.today()}.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
+            
+        st.markdown(report_md)
