@@ -57,7 +57,7 @@ def ai_generate_daily_brief(raw_input, scraped_text_block, lang_mode):
     
     # 基础结构：要求 AI 严格分行
     base_prompt = f"""
-    你是一位 Chilquinta 能源公司的情报专家。
+    你是一位 Chilquinta 能源公司的情报专家，精通**智利当地文化**与能源行业术语。
     请根据提供的【原始分类】和【抓取的正文】，写一份排版精美的日报。
     时间：{datetime.date.today()}
     
@@ -75,26 +75,37 @@ def ai_generate_daily_brief(raw_input, scraped_text_block, lang_mode):
     ---
     """
 
+    # 🌟 核心修改：智利特色与术语保留的通用强指令
+    term_instruction = """
+    【关键要求 - 智利特色与术语保留】：
+    在中文翻译中，遇到以下情况**必须**在括号内保留西语原文：
+    1. **智利行政机构与行业组织**：如 CNE (Comisión Nacional de Energía), SEC, SEA, Coordinador Eléctrico 等。
+    2. **专有名词与项目名**：如 PMGD, Net Billing 等。
+    3. **容易有歧义的词汇**：如 Ejecutivo (行政部门/政府/高管)，结合新闻内容，选择最正确的意思翻译。
+    4. **智利特色俗语与固定短语 (Chilenismos)**：如果文中出现智利特有的表达、俚语或具有特定法律含义的短语，请务必标注原文，确保准确性。
+    """
+
     if lang_mode == "中文 (保留西语术语)":
-        lang_instruction = """
+        lang_instruction = f"""
+        {term_instruction}
         【语言要求】：
         1. 标题：中文。
         2. 正文：中文摘要。
-        3. **术语保留**：机构名、法规、项目名、专有名词后必须保留西语原文，如：国家能源委员会 (CNE)。
         """
     elif lang_mode == "纯西语 (Español)":
         lang_instruction = """
         【语言要求】：
         1. 标题：Español.
-        2. 正文：Resumen en Español (Formal Business Tone).
+        2. 正文：Resumen en Español de Chile (Formal Business Tone).
         """
-    else: # 中文 & 西语对照 (🌟 修改点：这里加上了术语保留的要求)
-        lang_instruction = """
+    else: # 中文 & 西语对照
+        lang_instruction = f"""
+        {term_instruction}
         【语言要求 - 双语对照模式】：
         请严格按以下格式输出，不要把中西文混在一段里：
         
         **🇨🇳 中文摘要：**
-        [这里写中文摘要。⚠️关键要求：机构名、法规、项目名、专有名词后必须保留西语原文，例如：国家能源委员会 (CNE)、行政部门 (Ejecutivo)。]
+        [这里写中文摘要。**严格执行上述术语保留要求**，特别是智利特色的机构名和易歧义词汇。]
         
         **🇪🇸 Español:**
         [Aquí el resumen en español...]
@@ -180,12 +191,13 @@ def generate_word_file(markdown_text):
 # ==========================================
 st.set_page_config(page_title="Chilquinta News v1.2", page_icon="⚡", layout="wide")
 
-# 🌟 新增：侧边栏更新日志
+# 🌟 更新日志 
 with st.sidebar:
     st.header("📅 更新日志")
     st.markdown("""
-    * **2026.01.15 (v1.2 修补)**
-        * 优化双语模式：中文部分现已包含西语术语对照。
+    * **2026.01.15 (v1.2.1)**
+        * **智利本地化增强**：针对智利特有的行政机构（如 CNE）、行业术语、俗语（Chilenismos）及易歧义词汇，强制保留西语原文。
+        * **双语优化**：双语模式的中文摘要现已同步支持上述术语保留功能。
     * **2026.01.13 (v1.2)**
         * 优化排版：强制分行，字体层级优化（护眼模式）。
     * **2026.01.13 (v1.1)**
@@ -193,10 +205,10 @@ with st.sidebar:
     * **2025.12.24 (v1.0)**
         * 初始版本发布。
     """)
-    st.info("💡 提示：双语模式下，中文摘要也会保留关键术语（如 Ejecutivo），方便对照。")
+    st.info("💡 提示：系统已升级为“智利老油条”模式，精准识别 CNE, Ejecutivo 等易混淆术语。")
 
-st.title("⚡ Chilquinta 每日新闻 (v1.2)")
-st.caption("排版优化版 • 字体层级清晰 • 独立分行")
+st.title("⚡ Chilquinta 每日新闻 (v1.2.1)")
+st.caption("排版优化版 • 智利特色术语增强")
 
 raw_text = st.text_area("请粘贴新闻链接:", height=150)
 
